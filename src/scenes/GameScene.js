@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { getMergedStage, getStageConfig, selectMergePairs } from '../game/ballStages.js';
 
 const BOARD = {
   left: 24,
@@ -6,7 +7,6 @@ const BOARD = {
   top: 185,
   bottom: 755,
   wallThickness: 16,
-  ballRadius: 22,
   ballBodySides: 24,
   spawnY: 215,
   nextBallDelay: 250,
@@ -20,6 +20,7 @@ const BALL_PHYSICS = {
 };
 
 const BOARD_CENTER_X = (BOARD.left + BOARD.right) / 2;
+const DROP_STAGE = 1;
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -44,8 +45,7 @@ export default class GameScene extends Phaser.Scene {
 
     // 待機中の円と落下ガイドを用意し、最初の円を中央に表示する。
     this.guide = this.add.graphics().setDepth(1);
-    this.previewBall = this.add.circle(BOARD_CENTER_X, BOARD.spawnY, BOARD.ballRadius, 0xffd166)
-      .setStrokeStyle(2, 0xffffff)
+    this.previewBall = this.createBallVisual(BOARD_CENTER_X, BOARD.spawnY, DROP_STAGE)
       .setDepth(3);
     this.statusText = this.add.text(BOARD_CENTER_X, 787, 'プレイ領域をタッチ', {
       fontFamily: 'sans-serif',
@@ -56,7 +56,9 @@ export default class GameScene extends Phaser.Scene {
     this.aimX = BOARD_CENTER_X;
     this.activePointerId = null;
     this.activeDropBody = null;
-    this.ballBodies = new Set();
+    this.ballsByBody = new Map();
+    this.reservedMergeBodies = new Set();
+    this.pendingMergePairs = [];
     this.isReady = true;
     this.drawGuide();
 
@@ -166,10 +168,11 @@ export default class GameScene extends Phaser.Scene {
 
   updateAim(pointerX) {
     // 円の半径を考慮して位置を制限し、待機中の円とガイドを合わせる。
+    const radius = getStageConfig(DROP_STAGE).radius;
     this.aimX = Phaser.Math.Clamp(
       pointerX,
-      BOARD.left + BOARD.ballRadius,
-      BOARD.right - BOARD.ballRadius,
+      BOARD.left + radius,
+      BOARD.right - radius,
     );
     this.previewBall.x = this.aimX;
     this.drawGuide();
@@ -177,26 +180,28 @@ export default class GameScene extends Phaser.Scene {
 
   drawGuide() {
     // 円の中心から床までの線を、待機中だけ表示する。
+    const radius = getStageConfig(DROP_STAGE).radius;
     this.guide.clear();
     this.guide.lineStyle(2, 0xffffff, 0.35);
     this.guide.lineBetween(
       this.aimX,
-      BOARD.spawnY + BOARD.ballRadius,
+      BOARD.spawnY + radius,
       this.aimX,
       BOARD.bottom,
     );
   }
 
   isSpawnBlocked() {
-    // 新しい円の中心と落下済みの円の中心が、直径より近ければ配置できない。
-    const minimumDistanceSquared = (BOARD.ballRadius * 2) ** 2;
+    // 待機中の円と落下済みの円が重なる位置では、落下を受け付けない。
+    const spawnRadius = getStageConfig(DROP_STAGE).radius;
 
-    for (const body of this.ballBodies) {
+    for (const [body, { stage }] of this.ballsByBody) {
       const horizontalDistance = body.position.x - this.aimX;
       const verticalDistance = body.position.y - BOARD.spawnY;
       const distanceSquared = horizontalDistance ** 2 + verticalDistance ** 2;
+      const minimumDistance = spawnRadius + getStageConfig(stage).radius;
 
-      if (distanceSquared < minimumDistanceSquared) {
+      if (distanceSquared < minimumDistance ** 2) {
         return true;
       }
     }
@@ -217,13 +222,32 @@ export default class GameScene extends Phaser.Scene {
     this.guide.clear();
     this.statusText.setText('次の円を準備中');
 
-    const ball = this.add.circle(this.aimX, BOARD.spawnY, BOARD.ballRadius, 0xffd166)
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(2);
+    const body = this.createBall(this.aimX, BOARD.spawnY, DROP_STAGE);
+    this.activeDropBody = body;
+  }
+
+  createBallVisual(x, y, stage) {
+    // 仮色と段階番号を一つの表示にまとめ、物理ボディと同じ中心で動かす。
+    const { radius, color } = getStageConfig(stage);
+    const circle = this.add.circle(0, 0, radius, color).setStrokeStyle(2, 0xffffff);
+    const label = this.add.text(0, 0, String(stage), {
+      fontFamily: 'sans-serif',
+      fontSize: `${Math.min(32, radius)}px`,
+      color: '#ffffff',
+      stroke: '#162438',
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+
+    return this.add.container(x, y, [circle, label]).setSize(radius * 2, radius * 2);
+  }
+
+  createBall(x, y, stage) {
+    const radius = getStageConfig(stage).radius;
+    const ball = this.createBallVisual(x, y, stage).setDepth(2);
 
     // 床に接する辺が左右対称になる24角形を使い、着地時の片寄りを防ぐ。
     this.matter.add.gameObject(ball, {
-      shape: { type: 'polygon', sides: BOARD.ballBodySides, radius: BOARD.ballRadius },
+      shape: { type: 'polygon', sides: BOARD.ballBodySides, radius },
     });
 
     // 円同士の摩擦は残し、空気抵抗による横方向の減速をなくす。
@@ -233,33 +257,42 @@ export default class GameScene extends Phaser.Scene {
       BALL_PHYSICS.airResistance,
       BALL_PHYSICS.staticFriction,
     );
-    this.activeDropBody = ball.body;
-    this.ballBodies.add(ball.body);
+    this.ballsByBody.set(ball.body, { stage, ball });
+
+    return ball.body;
   }
 
   handleCollisionStart(event) {
     // 壁に当たった円だけ横移動と回転を止め、跳ね返りを防ぐ。
     this.stopBallsAtWalls(event.pairs);
 
-    // 今落とした円が床か別の円に初めて触れた時だけ、次の円を予約する。
-    if (!this.activeDropBody) {
-      return;
+    // 合体で円が消える前に、今落とした円の初回接触を判定する。
+    if (this.activeDropBody) {
+      const touchedFloorOrBall = event.pairs.some(({ bodyA, bodyB }) => {
+        const otherBody = bodyA === this.activeDropBody
+          ? bodyB
+          : bodyB === this.activeDropBody ? bodyA : null;
+
+        return otherBody === this.floorBody || this.ballsByBody.has(otherBody);
+      });
+
+      if (touchedFloorOrBall) {
+        this.activeDropBody = null;
+        this.time.delayedCall(BOARD.nextBallDelay, this.showNextBall, [], this);
+      }
     }
 
-    const touchedFloorOrBall = event.pairs.some(({ bodyA, bodyB }) => {
-      const otherBody = bodyA === this.activeDropBody
-        ? bodyB
-        : bodyB === this.activeDropBody ? bodyA : null;
+    // 同じ円を複数の組に使わず、物理更新後にまとめて合体させる。
+    const mergePairs = selectMergePairs(
+      event.pairs,
+      this.ballsByBody,
+      this.reservedMergeBodies,
+    );
+    this.pendingMergePairs.push(...mergePairs);
 
-      return otherBody === this.floorBody || this.ballBodies.has(otherBody);
-    });
-
-    if (!touchedFloorOrBall) {
-      return;
+    if (mergePairs.length > 0 && this.pendingMergePairs.length === mergePairs.length) {
+      this.events.once(Phaser.Scenes.Events.POST_UPDATE, this.resolvePendingMerges, this);
     }
-
-    this.activeDropBody = null;
-    this.time.delayedCall(BOARD.nextBallDelay, this.showNextBall, [], this);
   }
 
   stopBallsAtWalls(pairs) {
@@ -273,12 +306,50 @@ export default class GameScene extends Phaser.Scene {
         ballBody = bodyA;
       }
 
-      if (!this.ballBodies.has(ballBody)) {
+      if (!this.ballsByBody.has(ballBody)) {
         continue;
       }
 
       ballBody.gameObject.setVelocityX(0).setAngularVelocity(0);
     }
+  }
+
+  resolvePendingMerges() {
+    // 物理更新が終わってから元の2個を除き、次の段階を中間位置に作る。
+    for (const [bodyA, bodyB] of this.pendingMergePairs) {
+      const ballA = this.ballsByBody.get(bodyA);
+      const ballB = this.ballsByBody.get(bodyB);
+
+      if (!ballA || !ballB) {
+        continue;
+      }
+
+      const nextStage = getMergedStage(ballA.stage);
+      const x = (bodyA.position.x + bodyB.position.x) / 2;
+      const y = (bodyA.position.y + bodyB.position.y) / 2;
+      this.removeBall(bodyA);
+      this.removeBall(bodyB);
+
+      if (nextStage !== null) {
+        const { radius } = getStageConfig(nextStage);
+        this.createBall(
+          Phaser.Math.Clamp(x, BOARD.left + radius, BOARD.right - radius),
+          Phaser.Math.Clamp(y, BOARD.top + radius, BOARD.bottom - radius),
+          nextStage,
+        );
+      }
+    }
+
+    this.pendingMergePairs = [];
+    this.reservedMergeBodies.clear();
+  }
+
+  removeBall(body) {
+    // 合体元の表示と物理ボディを両方除き、衝突対象から外す。
+    const { ball } = this.ballsByBody.get(body);
+    this.ballsByBody.delete(body);
+    this.matter.world.remove(body);
+    ball.destroy();
   }
 
   showNextBall() {
