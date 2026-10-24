@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { getMergedStage, getStageConfig, selectMergePairs } from '../game/ballStages.js';
+import { DEFAULT_TRAIN_ORDER, getTrainIdForStage, TRAINS } from '../game/trains.js';
 import { BOARD } from './gameLayout.js';
 import {
   advanceDropStages,
@@ -20,13 +21,28 @@ const BALL_PHYSICS = {
 const BOARD_CENTER_X = (BOARD.left + BOARD.right) / 2;
 const NEXT_PREVIEW_X = 320;
 const NEXT_PREVIEW_Y = 104;
+const TRAIN_TEXTURE_SIZE = 512;
+const sourceTextureKey = (trainId) => `train-source-${trainId}`;
+const iconTextureKey = (trainId) => `train-icon-${trainId}`;
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene');
   }
 
+  preload() {
+    // 各電車の画像を一度読み込み、盤面と予告表示で共用する。
+    for (const [trainId, { imageUrl }] of Object.entries(TRAINS)) {
+      if (!this.textures.exists(iconTextureKey(trainId))) {
+        this.load.image(sourceTextureKey(trainId), imageUrl);
+      }
+    }
+  }
+
   create() {
+    // 四隅が不透明な画像も円として表示できるよう、切り抜いたテクスチャを作る。
+    this.createTrainTextures();
+
     // プレイごとに得点と現在・次の段階を初期化する。
     this.score = 0;
     this.currentStage = drawDropStage();
@@ -62,7 +78,7 @@ export default class GameScene extends Phaser.Scene {
       color: '#bfd5e3',
     }).setOrigin(0.5);
 
-    // 抽選した現在の円と落下ガイドを中央に表示する。
+    // 抽選した現在の電車と落下ガイドを中央に表示する。
     this.guide = this.add.graphics().setDepth(1);
     this.previewBall = this.createBallVisual(BOARD_CENTER_X, BOARD.spawnY, this.currentStage)
       .setDepth(3);
@@ -81,12 +97,39 @@ export default class GameScene extends Phaser.Scene {
     this.isReady = true;
     this.drawGuide();
 
-    // 一つの指で落下位置を決め、衝突した後だけ次の円を用意する。
+    // 一つの指で落下位置を決め、衝突した後だけ次の電車を用意する。
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.input.on('pointermove', this.handlePointerMove, this);
     this.input.on('pointerup', this.handlePointerUp, this);
     this.input.on('pointerupoutside', this.handlePointerUpOutside, this);
     this.matter.world.on('collisionstart', this.handleCollisionStart, this);
+  }
+
+  createTrainTextures() {
+    // 読み込みに成功した画像だけを円形に切り抜き、元画像のテクスチャを解放する。
+    for (const trainId of DEFAULT_TRAIN_ORDER) {
+      const sourceKey = sourceTextureKey(trainId);
+
+      if (this.textures.exists(iconTextureKey(trainId)) || !this.textures.exists(sourceKey)) {
+        continue;
+      }
+
+      const sourceImage = this.textures.get(sourceKey).getSourceImage();
+      const texture = this.textures.createCanvas(
+        iconTextureKey(trainId),
+        TRAIN_TEXTURE_SIZE,
+        TRAIN_TEXTURE_SIZE,
+      );
+      const context = texture.getContext();
+      const center = TRAIN_TEXTURE_SIZE / 2;
+
+      context.beginPath();
+      context.arc(center, center, center, 0, Math.PI * 2);
+      context.clip();
+      context.drawImage(sourceImage, 0, 0, TRAIN_TEXTURE_SIZE, TRAIN_TEXTURE_SIZE);
+      texture.refresh();
+      this.textures.remove(sourceKey);
+    }
   }
 
   createBoard() {
@@ -261,16 +304,16 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
-    // 待機中の表示を消し、円を落下させる。
+    // 待機中の表示を消し、電車を落下させる。
     this.isReady = false;
     this.guide.clear();
-    this.statusText.setText('次の円を準備中');
+    this.statusText.setText('次の電車を準備中');
 
     const upcomingStages = advanceDropStages(this.currentStage, this.nextStage);
     const body = this.createBall(this.aimX, BOARD.spawnY, upcomingStages.droppedStage);
     this.activeDropBody = body;
 
-    // 表示していた次の段階を繰り上げ、新しい次の円を抽選する。
+    // 表示していた次の段階を繰り上げ、新しい次の電車を抽選する。
     this.currentStage = upcomingStages.currentStage;
     this.nextStage = upcomingStages.nextStage;
     this.previewBall.destroy();
@@ -288,7 +331,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createNextBallPreview(stage) {
-    // 小さい段階でも番号が読める大きさを保ち、次の円を見出し内へ収める。
+    // 小さい段階の画像も見える大きさに保ち、次の電車を見出し内へ収める。
     const radius = getStageConfig(stage).radius;
     const scale = Math.max(0.7, 15 / radius);
 
@@ -296,8 +339,17 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createBallVisual(x, y, stage) {
-    // 仮色と段階番号を一つの表示にまとめ、物理ボディと同じ中心で動かす。
+    // 段階に対応する電車を、物理ボディと同じ中心・直径で表示する。
     const { radius, color } = getStageConfig(stage);
+    const trainId = getTrainIdForStage(stage);
+    const textureKey = iconTextureKey(trainId);
+
+    if (trainId && this.textures.exists(textureKey)) {
+      const image = this.add.image(0, 0, textureKey).setDisplaySize(radius * 2, radius * 2);
+      return this.add.container(x, y, [image]).setSize(radius * 2, radius * 2);
+    }
+
+    // 画像を読み込めない場合も段階を区別できる色付き円を表示する。
     const circle = this.add.circle(0, 0, radius, color).setStrokeStyle(2, 0xffffff);
     const label = this.add.text(0, 0, String(stage), {
       fontFamily: 'sans-serif',
