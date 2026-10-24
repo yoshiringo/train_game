@@ -12,14 +12,27 @@ test('11段階の半径と最終段階の結果を管理する', () => {
   assert.equal(STAGES.length, 11);
   assert.equal(new Set(STAGES.map(({ color }) => color)).size, 11);
   assert.ok(STAGES.every(({ radius }, index) => index === 0 || radius > STAGES[index - 1].radius));
-  assert.equal(getStageConfig(1).radius, 22);
-  assert.equal(getStageConfig(11).radius, 79);
+  assert.equal(getStageConfig(1).radius, 13.5);
+  assert.equal(getStageConfig(11).radius, 106.5);
 
   for (let stage = 1; stage < 11; stage++) {
     assert.equal(getMergedStage(stage), stage + 1);
   }
 
   assert.equal(getMergedStage(11), null);
+});
+
+test('各段階の円の面積比を参考値に近づける', () => {
+  // 円の面積は半径の二乗に比例するので、最小段階を基準に比較する。
+  const referenceAreas = [1191, 2077, 4046, 5554, 8857, 14085, 18743, 28080, 35166, 52640, 74018];
+  const firstRadius = getStageConfig(1).radius;
+
+  for (let index = 0; index < referenceAreas.length; index++) {
+    const referenceRatio = referenceAreas[index] / referenceAreas[0];
+    const actualRatio = (getStageConfig(index + 1).radius / firstRadius) ** 2;
+
+    assert.ok(Math.abs(actualRatio / referenceRatio - 1) < 0.025);
+  }
 });
 
 test('3個が同時に接触しても、同じ円を二度使わない', () => {

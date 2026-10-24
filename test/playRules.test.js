@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { BOARD } from '../src/scenes/gameLayout.js';
 import {
   advanceDropStages,
   drawDropStage,
@@ -49,11 +50,11 @@ test('上端から戻るとゲームオーバーまでの計時をやり直す',
 
 test('玉の縦の直径の3分の2が上端より外に出た位置を境界とする', () => {
   // 大きさの違う玉について、境界の直前と境界上を比べる。
-  for (const radius of [22, 42, 79]) {
-    const centerAtLimit = 185 - radius / 3;
+  for (const radius of [13.5, 37, 106.5]) {
+    const centerAtLimit = BOARD.top - radius / 3;
 
-    assert.equal(isBallBeyondUpperLimit(centerAtLimit + 0.01, radius, 185), false);
-    assert.equal(isBallBeyondUpperLimit(centerAtLimit, radius, 185), true);
+    assert.equal(isBallBeyondUpperLimit(centerAtLimit + 0.01, radius, BOARD.top), false);
+    assert.equal(isBallBeyondUpperLimit(centerAtLimit, radius, BOARD.top), true);
   }
 });
 
@@ -61,14 +62,14 @@ test('一瞬だけ大きくはみ出した玉は、戻った後に再計時す�
   // 同じ玉が線の内側へ戻れば、以前の経過時間を持ち越さない。
   const body = {};
   const timers = new Map();
-  const outside = [{ body, centerY: 170, radius: 42 }];
-  const inside = [{ body, centerY: 180, radius: 42 }];
+  const outside = [{ body, centerY: 145, radius: 37 }];
+  const inside = [{ body, centerY: 155, radius: 37 }];
 
-  assert.equal(updateOverflowTimers(timers, outside, 185, 1000), false);
-  assert.equal(updateOverflowTimers(timers, inside, 185, 1000), false);
+  assert.equal(updateOverflowTimers(timers, outside, BOARD.top, 1000), false);
+  assert.equal(updateOverflowTimers(timers, inside, BOARD.top, 1000), false);
   assert.equal(timers.has(body), false);
-  assert.equal(updateOverflowTimers(timers, outside, 185, 1000), false);
-  assert.equal(updateOverflowTimers(timers, outside, 185, 1000), true);
+  assert.equal(updateOverflowTimers(timers, outside, BOARD.top, 1000), false);
+  assert.equal(updateOverflowTimers(timers, outside, BOARD.top, 1000), true);
 });
 
 test('別の玉へはみ出しが移っても、時間を合算しない', () => {
@@ -78,13 +79,13 @@ test('別の玉へはみ出しが移っても、時間を合算しない', () =>
   const timers = new Map();
 
   assert.equal(updateOverflowTimers(timers, [
-    { body: first, centerY: 170, radius: 42 },
-    { body: second, centerY: 180, radius: 42 },
-  ], 185, 1000), false);
+    { body: first, centerY: 145, radius: 37 },
+    { body: second, centerY: 155, radius: 37 },
+  ], BOARD.top, 1000), false);
   assert.equal(updateOverflowTimers(timers, [
-    { body: first, centerY: 180, radius: 42 },
-    { body: second, centerY: 170, radius: 42 },
-  ], 185, 1000), false);
+    { body: first, centerY: 155, radius: 37 },
+    { body: second, centerY: 145, radius: 37 },
+  ], BOARD.top, 1000), false);
   assert.equal(timers.has(first), false);
   assert.equal(timers.get(second), 1000);
 });
@@ -95,30 +96,30 @@ test('合体で消えた玉の計時を破棄する', () => {
   const merged = {};
   const timers = new Map();
 
-  updateOverflowTimers(timers, [{ body: removed, centerY: 170, radius: 42 }], 185, 1000);
+  updateOverflowTimers(timers, [{ body: removed, centerY: 145, radius: 37 }], BOARD.top, 1000);
   assert.equal(updateOverflowTimers(timers, [
-    { body: merged, centerY: 170, radius: 42 },
-  ], 185, 1000), false);
+    { body: merged, centerY: 145, radius: 37 },
+  ], BOARD.top, 1000), false);
   assert.equal(timers.has(removed), false);
   assert.equal(timers.get(merged), 1000);
 });
 
 test('選んだ位置だけが塞がれていても、空き位置を見つけられる', () => {
   // 大きな円の横には置けるが、中心には重なって置けない状態を使う。
-  const balls = [{ x: 195, y: 264, stage: 11 }];
+  const balls = [{ x: 195, y: 266.5, stage: 11 }];
 
-  assert.equal(isSpawnBlocked(195, 231, 5, balls), true);
-  assert.equal(isSpawnBlocked(66, 231, 5, balls), false);
-  assert.equal(hasOpenSpawnPosition(231, 5, balls, 24, 366), true);
+  assert.equal(isSpawnBlocked(195, BOARD.spawnY, 5, balls), true);
+  assert.equal(isSpawnBlocked(45, BOARD.spawnY, 5, balls), false);
+  assert.equal(hasOpenSpawnPosition(BOARD.spawnY, 5, balls, BOARD.left, BOARD.right), true);
 });
 
 test('左右の空き位置が全て塞がれた状態を検出する', () => {
   // 2個の大きな円で、落下できる横幅全体が埋まる状態を使う。
   const balls = [
-    { x: 100, y: 264, stage: 11 },
-    { x: 290, y: 264, stage: 11 },
+    { x: 100, y: 266.5, stage: 11 },
+    { x: 290, y: 266.5, stage: 11 },
   ];
 
-  assert.equal(hasOpenSpawnPosition(231, 5, balls, 24, 366), false);
-  assert.equal(hasOpenSpawnPosition(231, 5, [], 24, 366), true);
+  assert.equal(hasOpenSpawnPosition(BOARD.spawnY, 5, balls, BOARD.left, BOARD.right), false);
+  assert.equal(hasOpenSpawnPosition(BOARD.spawnY, 5, [], BOARD.left, BOARD.right), true);
 });

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { getMergedStage, getStageConfig, selectMergePairs } from '../game/ballStages.js';
+import { BOARD } from './gameLayout.js';
 import {
   advanceDropStages,
   drawDropStage,
@@ -9,17 +10,6 @@ import {
   updateOverflowTimers,
 } from '../game/playRules.js';
 
-const BOARD = {
-  left: 24,
-  right: 366,
-  top: 185,
-  bottom: 755,
-  wallThickness: 16,
-  ballBodySides: 24,
-  spawnY: 231,
-  nextBallDelay: 250,
-};
-
 const BALL_PHYSICS = {
   bounce: 0.1,
   friction: 0.12,
@@ -28,6 +18,8 @@ const BALL_PHYSICS = {
 };
 
 const BOARD_CENTER_X = (BOARD.left + BOARD.right) / 2;
+const NEXT_PREVIEW_X = 320;
+const NEXT_PREVIEW_Y = 104;
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -46,25 +38,25 @@ export default class GameScene extends Phaser.Scene {
     // プレイ領域を描き、同じ境界に固定壁と床を配置する。
     this.createBoard();
 
-    this.add.text(BOARD_CENTER_X, 34, '電車ゲーム', {
+    this.add.text(BOARD_CENTER_X, 28, '電車ゲーム', {
       fontFamily: 'sans-serif',
-      fontSize: '30px',
+      fontSize: '28px',
       color: '#ffffff',
     }).setOrigin(0.5);
 
-    this.scoreText = this.add.text(28, 104, 'スコア 0', {
+    this.scoreText = this.add.text(24, 100, 'スコア 0', {
       fontFamily: 'sans-serif',
       fontSize: '23px',
       color: '#ffffff',
     }).setOrigin(0, 0.5);
-    this.add.text(320, 69, 'つぎ', {
+    this.add.text(NEXT_PREVIEW_X, 58, 'つぎ', {
       fontFamily: 'sans-serif',
       fontSize: '18px',
       color: '#bfd5e3',
     }).setOrigin(0.5);
-    this.nextBallPreview = this.createBallVisual(320, 113, this.nextStage).setScale(0.55);
+    this.nextBallPreview = this.createNextBallPreview(this.nextStage);
 
-    this.add.text(BOARD_CENTER_X, 158, '指で左右に動かして、離して落とす', {
+    this.add.text(BOARD_CENTER_X, 145, '指で左右に動かして、離して落とす', {
       fontFamily: 'sans-serif',
       fontSize: '18px',
       color: '#bfd5e3',
@@ -74,7 +66,7 @@ export default class GameScene extends Phaser.Scene {
     this.guide = this.add.graphics().setDepth(1);
     this.previewBall = this.createBallVisual(BOARD_CENTER_X, BOARD.spawnY, this.currentStage)
       .setDepth(3);
-    this.statusText = this.add.text(BOARD_CENTER_X, 787, 'プレイ領域をタッチ', {
+    this.statusText = this.add.text(BOARD_CENTER_X, 650, 'プレイ領域をタッチ', {
       fontFamily: 'sans-serif',
       fontSize: '18px',
       color: '#ffffff',
@@ -292,7 +284,15 @@ export default class GameScene extends Phaser.Scene {
     );
     this.previewBall.x = this.aimX;
     this.nextBallPreview.destroy();
-    this.nextBallPreview = this.createBallVisual(320, 113, this.nextStage).setScale(0.55);
+    this.nextBallPreview = this.createNextBallPreview(this.nextStage);
+  }
+
+  createNextBallPreview(stage) {
+    // 小さい段階でも番号が読める大きさを保ち、次の円を見出し内へ収める。
+    const radius = getStageConfig(stage).radius;
+    const scale = Math.max(0.7, 15 / radius);
+
+    return this.createBallVisual(NEXT_PREVIEW_X, NEXT_PREVIEW_Y, stage).setScale(scale);
   }
 
   createBallVisual(x, y, stage) {
@@ -304,7 +304,7 @@ export default class GameScene extends Phaser.Scene {
       fontSize: `${Math.min(32, radius)}px`,
       color: '#ffffff',
       stroke: '#162438',
-      strokeThickness: 4,
+      strokeThickness: Math.min(4, radius / 5),
     }).setOrigin(0.5);
 
     return this.add.container(x, y, [circle, label]).setSize(radius * 2, radius * 2);
