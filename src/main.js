@@ -17,6 +17,8 @@ new Phaser.Game({
     default: 'matter',
     matter: {
       debug: false,
+      enableSleeping: false,
+      gravity: { y: 1.1 },
     },
   },
   scene: GameScene,
