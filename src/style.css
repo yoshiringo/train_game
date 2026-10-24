@@ -1,0 +1,23 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #162438;
+  overflow: hidden;
+}
+
+#game {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  touch-action: none;
+}
+
+#game canvas {
+  display: block;
+  touch-action: none;
+}
