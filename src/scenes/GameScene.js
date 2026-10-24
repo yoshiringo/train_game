@@ -119,22 +119,33 @@ export default class GameScene extends Phaser.Scene {
   }
 
   handlePointerUp(pointer) {
-    // 操作を始めた指を画面内で離した時、その位置から円を落とす。
+    // 操作していた指の終了だけを受け付け、OSによる取り消しは落下させない。
     if (pointer.id !== this.activePointerId) {
       return;
     }
 
+    if (pointer.wasCanceled) {
+      this.cancelAim();
+      return;
+    }
+
+    // 通常の指離しでは最後の位置を反映して円を落とす。
     this.updateAim(pointer.x);
     this.activePointerId = null;
     this.dropBall();
   }
 
   handlePointerUpOutside(pointer) {
-    // 画面外で指を離した場合は誤落下を防ぎ、待機状態へ戻す。
+    // 画面外で指を離した時は操作を取り消す。
     if (pointer.id !== this.activePointerId) {
       return;
     }
 
+    this.cancelAim();
+  }
+
+  cancelAim() {
+    // 待機中の円を残したまま、次のタッチを受け付ける状態へ戻す。
     this.activePointerId = null;
     this.statusText.setText('プレイ領域をタッチ');
   }
